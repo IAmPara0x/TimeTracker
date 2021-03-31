@@ -7,9 +7,12 @@ import Data.Time (LocalTime, getCurrentTimeZone, localDay, utcToLocalTime)
 import Data.Time.Calendar (showGregorian)
 import Data.Time.Clock (getCurrentTime, utctDayTime)
 import Data.Time.Format (defaultTimeLocale, formatTime, parseTimeOrError)
+import InfoUtils
+import MsgUtils
 import System.Directory (doesFileExist, removeFile)
 import System.Exit (exitSuccess)
 import System.IO
+import System.Process (callCommand)
 import Text.Read (readMaybe)
 
 data Arg
@@ -35,7 +38,7 @@ exec (arg, res) =
       if null arg
         then getLine >>= exec . checkArgs
         else do
-          putStrLn (arg ++ " is not a valid command. Please enter again. \n")
+          errMsg (arg ++ " is not a valid command. Please enter again. \n")
           getLine >>= exec . checkArgs
   where
     createArg x
@@ -57,14 +60,15 @@ initArg = do
   strDate <- date
   fileExist <- doesTrackerExist
   if fileExist
-    then putStrLn "you have already created today's time tracker file. \n"
+    then errMsg "you have already created today's time tracker file. \n"
     else do
-      file <- openFile (strDate ++ "_time_tracker.md") WriteMode
+      tDir <- readInfoFile <&> (getTrackerDir . fromJust)
+      file <- openFile (tDir ++ strDate ++ "_time_tracker.md") WriteMode
       hPutStrLn file ("### Time spent on: " ++ strDate ++ "\n")
-      putStrLn "Please enter your wake up time. Default current time. format (HH:MM 24hr)  eg: 16:56"
+      infoMsg "Please enter your wake up time. Default current time. format (HH:MM 24hr)  eg: 16:56"
       strTime <- getLine >>= parseTime
       hPutStrLn file ("> wakeup Time: " ++ strTime ++ "\n")
-      putStrLn "Your today's time tracker file has been intialized successfully. \n"
+      successMsg "Your today's time tracker file has been intialized successfully. \n"
       writeCacheFile (createCacheFile (strDate ++ "_time_tracker.md") None 0 0 0 0)
       hClose file
   where
@@ -73,15 +77,15 @@ initArg = do
       | null str = getLocalTime <&> getTimeToString
       | isValidTime str = return str
       | otherwise = do
-        putStrLn ("The given time was not valid. " ++ str ++ " Please enter again. \n")
+        errMsg ("The given time was not valid. " ++ str ++ " Please enter again. \n")
         getLine >>= parseTime
     isValidTime _ = True
 
 addArg :: IO ()
 addArg = do
-  putStrLn "Please Describe the current task that you will be doing. \n"
+  infoMsg "Please Describe the current task that you will be doing. \n"
   aName <- getLine
-  putStrLn
+  infoMsg
     "Amoung Which of the three categories you will classify you current task?\
     \ \n 1. Productive \
     \ \n 2. UnProductive \
@@ -91,17 +95,18 @@ addArg = do
   fileExist <- doesTrackerExist
   if fileExist
     then do
-      cacheF <- readCacheFile >>= return . fromJust
+      cacheF <- readCacheFile <&> fromJust
       let fName = getTrackerFilename cacheF
-      file <- openFile fName AppendMode
+      tDir <- readInfoFile <&> (getTrackerDir . fromJust)
+      file <- openFile (tDir ++ fName) AppendMode
       strTime <- getLocalTime <&> getTimeToString
-      hPutStrLn file ("> " ++ aName ++ " : " ++ strTime ++ " \n")
+      hPutStrLn file ("> " ++ aName ++ " [" ++ show (head (show aT)) ++ "] " ++ " : " ++ strTime ++ " \n")
       hClose file
       currIntTime <- getTimeInInt
       cacheF' <- calculateTimeSpent cacheF
-      writeCacheFile (cacheF' {activityTime = currIntTime, activityType=aT})
-      putStrLn "Your current activity has been successfully added. \n"
-    else putStrLn "Today's Tracker does not exist please create one. \n"
+      writeCacheFile (cacheF' {activityTime = currIntTime, activityType = aT})
+      successMsg "Your current activity has been successfully added. \n"
+    else errMsg "Today's Tracker does not exist please create one. \n"
   where
     parseInt :: String -> Maybe Int
     parseInt s =
@@ -115,7 +120,7 @@ addArg = do
     isValidType :: Maybe Int -> IO AType
     isValidType (Just i) = getATypeFromInt i
     isValidType Nothing = do
-      putStrLn "Please enter a valid number. \n"
+      errMsg "Please enter a valid number. \n"
       getLine >>= isValidType . parseInt
 
     getATypeFromInt :: Int -> IO AType
@@ -128,36 +133,55 @@ commitArg :: IO ()
 commitArg = do
   fileExist <- doesTrackerExist
   if fileExist
-     then do
-       cacheF <- readCacheFile <&> fromJust
-       deleteCacheFile
-       let fName = getTrackerFilename cacheF
-       fContent <- readFile fName <&> \x -> [e | e <- lines x, not (null e)]
-       removeFile fName
-       cacheF' <- calculateTimeSpent cacheF
-       let tPTime = intTimeToHrs (getTProdTime cacheF')
-       let tUTime = intTimeToHrs (getTUnProdTime cacheF')
-       let tMTime = intTimeToHrs (getTMiscTime cacheF')
-       let tTimeSpentMsgs = ["> Total Productive Time : " ++ show (fst tPTime) ++ "hrs " ++ show (snd tPTime) ++ "min",
-                             "> Total UnProductive Time : " ++ show (fst tUTime) ++ "hrs " ++ show (snd tUTime) ++ "min",
-                             "> Total Miscellaneous Time : " ++ show (fst tMTime) ++ "hrs " ++ show (snd tMTime) ++ "min"]
-       let fContent' = (head fContent : tTimeSpentMsgs) ++ tail fContent
-       file <- openFile fName WriteMode
-       wFile file fContent'
-       hClose file
-       putStrLn "success"
-      else putStrLn "Today's Tracker does not exist please create one. To commit today's tracker. \n"
+    then do
+      cacheF <- readCacheFile <&> fromJust
+      deleteCacheFile
+      tDir <- readInfoFile <&> (getTrackerDir . fromJust)
+      let fName = getTrackerFilename cacheF
+      fContent <- readFile (tDir ++ fName) <&> \x -> [e | e <- lines x, not (null e)]
+      removeFile (tDir ++ fName)
+      cacheF' <- calculateTimeSpent cacheF
+      let tPTime = intTimeToHrs (getTProdTime cacheF')
+      let tUTime = intTimeToHrs (getTUnProdTime cacheF')
+      let tMTime = intTimeToHrs (getTMiscTime cacheF')
+      let tTimeSpentMsgs =
+            [ "> Total Productive Time : " ++ show (fst tPTime) ++ "hrs " ++ show (snd tPTime) ++ "min",
+              "> Total UnProductive Time : " ++ show (fst tUTime) ++ "hrs " ++ show (snd tUTime) ++ "min",
+              "> Total Miscellaneous Time : " ++ show (fst tMTime) ++ "hrs " ++ show (snd tMTime) ++ "min"
+            ]
+      let fContent' = (head fContent : tTimeSpentMsgs) ++ tail fContent
+      file <- openFile (tDir ++ fName) WriteMode
+      wFile file fContent'
+      hClose file
+      successMsg "your today's tracker file has been sucessfully commited."
+    else errMsg "Today's Tracker does not exist please create one. To commit today's tracker. \n"
   where
     wFile :: Handle -> [String] -> IO ()
-    wFile h [] = hPutStrLn h  ""
-    wFile h (x:xs) = (hPutStrLn h (x ++ "\n")) >> wFile h xs
-
+    wFile h [] = hPutStrLn h ""
+    wFile h (x : xs) = hPutStrLn h (x ++ "\n") >> wFile h xs
 
 viewArg :: IO ()
-viewArg = putStrLn "This is view command. \n"
+viewArg = do
+  infoMsgB
+    "Please enter the date of the tracker file you want to view. FORMAT: YY-MM-DD, eg: 2021-03-29. \n \
+    \ Default will open today's tracker file. \n"
+  trackerDate <- getLine
+  trackerName <- getTrackerName trackerDate
+  trackerExist <- doesFileExist trackerName
+  if trackerExist
+    then do
+      tViewer <- readInfoFile <&> (getTrackerViewer . fromJust)
+      callCommand (tViewer ++ " " ++ trackerName)
+    else do
+      errMsg ("tracker file of date " ++ trackerDate ++ " doesn't exist.")
+  where
+    getTrackerName :: String -> IO String
+    getTrackerName x
+      | null x = readCacheFile <&> (getTrackerFilename . fromJust)
+      | otherwise = return (x ++ "_time_tracker.md")
 
 exitArg :: IO ()
-exitArg = putStrLn "exiting !!!" >> exitSuccess
+exitArg = errMsg "exiting !!!" >> exitSuccess
 
 -- helper functions
 date :: IO String
@@ -182,10 +206,8 @@ doesTrackerExist = do
   fileExist <- doesCacheFileExist
   if fileExist
     then do
-      f <- readCacheFile
-      case f of
-        Just x -> doesFileExist (getTrackerFilename x)
-        Nothing -> return False
+      tDir <- readInfoFile <&> (getTrackerDir . fromJust)
+      readCacheFile >>= (\x -> doesFileExist (tDir ++ x)) . getTrackerFilename . fromJust
     else return False
 
 getTimeInInt :: IO Int
@@ -203,9 +225,10 @@ calculateTimeSpent f = getTimeInInt <&> updateTimeSpent f
       | getAType cF == Misc = cF {totalMiscTime = getTMiscTime cF + timeDiff cF t}
       | getAType cF == None = cF
       where
-        timeDiff f' x =  abs (getATime f' - x)
+        timeDiff f' x = abs (getATime f' - x)
 
 intTimeToHrs :: Int -> (Int, Int)
 intTimeToHrs t = (hrs t, mins t)
-  where hrs x = x `div` 3600
-        mins x = (x `rem` 3600) `div` 60
+  where
+    hrs x = x `div` 3600
+    mins x = (x `rem` 3600) `div` 60

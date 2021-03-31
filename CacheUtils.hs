@@ -22,6 +22,7 @@ import Data.Aeson (FromJSON, ToJSON, eitherDecode, encode)
 import qualified Data.ByteString.Lazy as B
 import GHC.Generics
 import System.Directory (doesFileExist, removeFile)
+import InfoUtils (infoDirPath)
 
 data CacheVars = CacheVars
   { trackerFileName :: String,
@@ -48,11 +49,11 @@ instance FromJSON AType
 
 instance ToJSON AType
 
-cacheFile :: FilePath
-cacheFile = "cache.json"
+cacheFile :: IO FilePath
+cacheFile = infoDirPath >>= \x -> return (x ++ "cache.json")
 
 doesCacheFileExist :: IO Bool
-doesCacheFileExist = doesFileExist cacheFile
+doesCacheFileExist = cacheFile >>= doesFileExist
 
 readCacheFile :: IO (Maybe CacheVars)
 readCacheFile = do
@@ -63,13 +64,13 @@ readCacheFile = do
     Right [] -> return Nothing
   where
     getJSON :: IO B.ByteString
-    getJSON = B.readFile cacheFile
+    getJSON = cacheFile >>= B.readFile 
 
 writeCacheFile :: CacheVars -> IO ()
-writeCacheFile cache = B.writeFile cacheFile (encode [cache])
+writeCacheFile cache = cacheFile >>= \x -> B.writeFile x (encode [cache])
 
-deleteCacheFile :: IO()
-deleteCacheFile = removeFile cacheFile
+deleteCacheFile :: IO ()
+deleteCacheFile = cacheFile >>= removeFile 
 
 createCacheFile :: String -> AType -> Int -> Int -> Int -> Int -> CacheVars
 createCacheFile = CacheVars
@@ -91,4 +92,3 @@ getTUnProdTime (CacheVars _ _ _ _ a _) = a
 
 getTMiscTime :: CacheVars -> Int
 getTMiscTime (CacheVars _ _ _ _ _ a) = a
-
