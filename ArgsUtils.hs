@@ -63,13 +63,16 @@ initArg = do
     then errMsg "you have already created today's time tracker file. \n"
     else do
       tDir <- readInfoFile <&> (getTrackerDir . fromJust)
-      file <- openFile (tDir ++ strDate ++ "_time_tracker.md") WriteMode
-      hPutStrLn file ("### Time spent on: " ++ strDate ++ "\n")
+      file <- openFile (tDir ++ strDate ++ "_time_tracker.html") WriteMode
+      header <- readFile "header.html"
+      hPutStrLn file (header ++ strDate ++ " </h2> </font> \n")
       infoMsg "Please enter your wake up time. Default current time. format (HH:MM 24hr)  eg: 16:56"
       strTime <- getLine >>= parseTime
-      hPutStrLn file ("> wakeup Time: " ++ strTime ++ "\n")
+      hPutStrLn file lineTag
+      hPutStrLn file listTag
+      hPutStrLn file (elemTag "wakeup Time: " strTime)
       successMsg "Your today's time tracker file has been intialized successfully. \n"
-      writeCacheFile (createCacheFile (strDate ++ "_time_tracker.md") None 0 0 0 0)
+      writeCacheFile (createCacheFile (strDate ++ "_time_tracker.html") None 0 0 0 0)
       hClose file
   where
     parseTime :: String -> IO String
@@ -100,7 +103,7 @@ addArg = do
       tDir <- readInfoFile <&> (getTrackerDir . fromJust)
       file <- openFile (tDir ++ fName) AppendMode
       strTime <- getLocalTime <&> getTimeToString
-      hPutStrLn file ("> " ++ aName ++ " [" ++ show (head (show aT)) ++ "] " ++ " : " ++ strTime ++ " \n")
+      hPutStrLn file (elemTag (aName ++ " [" ++ show (head (show aT)) ++ "] " ++ " : ") strTime)
       hClose file
       currIntTime <- getTimeInInt
       cacheF' <- calculateTimeSpent cacheF
@@ -138,27 +141,21 @@ commitArg = do
       deleteCacheFile
       tDir <- readInfoFile <&> (getTrackerDir . fromJust)
       let fName = getTrackerFilename cacheF
-      fContent <- readFile (tDir ++ fName) <&> \x -> [e | e <- lines x, not (null e)]
-      removeFile (tDir ++ fName)
+      file <- openFile (tDir ++ fName) AppendMode
       cacheF' <- calculateTimeSpent cacheF
       let tPTime = intTimeToHrs (getTProdTime cacheF')
       let tUTime = intTimeToHrs (getTUnProdTime cacheF')
       let tMTime = intTimeToHrs (getTMiscTime cacheF')
-      let tTimeSpentMsgs =
-            [ "> Total Productive Time : " ++ show (fst tPTime) ++ "hrs " ++ show (snd tPTime) ++ "min",
-              "> Total UnProductive Time : " ++ show (fst tUTime) ++ "hrs " ++ show (snd tUTime) ++ "min",
-              "> Total Miscellaneous Time : " ++ show (fst tMTime) ++ "hrs " ++ show (snd tMTime) ++ "min"
-            ]
-      let fContent' = (head fContent : tTimeSpentMsgs) ++ tail fContent
-      file <- openFile (tDir ++ fName) WriteMode
-      wFile file fContent'
+      hPutStrLn file "<//ol>"
+      hPutStrLn file lineTag
+      hPutStrLn file (timeSpentTag "Total Productive Time :" (show (fst tPTime) ++ "hrs " ++ show (snd tPTime) ++ "min"))
+      hPutStrLn file (timeSpentTag "Total UnProductive Time :" (show (fst tUTime) ++ "hrs " ++ show (snd tUTime) ++ "min"))
+      hPutStrLn file (timeSpentTag "Total Miscellaneous Time :" (show (fst tMTime) ++ "hrs " ++ show (snd tMTime) ++ "min"))
+      hPutStrLn file "<//body><//html>"
       hClose file
+
       successMsg "your today's tracker file has been sucessfully commited."
     else errMsg "Today's Tracker does not exist please create one. To commit today's tracker. \n"
-  where
-    wFile :: Handle -> [String] -> IO ()
-    wFile h [] = hPutStrLn h ""
-    wFile h (x : xs) = hPutStrLn h (x ++ "\n") >> wFile h xs
 
 viewArg :: IO ()
 viewArg = do
@@ -167,21 +164,23 @@ viewArg = do
     \ Default will open today's tracker file. \n"
   trackerDate <- getLine
   trackerName <- getTrackerName trackerDate
-  trackerExist <- doesFileExist trackerName
+  tDir <- readInfoFile <&> (getTrackerDir . fromJust)
+  trackerExist <- doesFileExist (tDir ++ trackerName)
   if trackerExist
     then do
       tViewer <- readInfoFile <&> (getTrackerViewer . fromJust)
-      callCommand (tViewer ++ " " ++ trackerName)
+      callCommand (tViewer ++ " " ++ (tDir ++ trackerName))
     else do
       errMsg ("tracker file of date " ++ trackerDate ++ " doesn't exist.")
   where
     getTrackerName :: String -> IO String
     getTrackerName x
       | null x = readCacheFile <&> (getTrackerFilename . fromJust)
-      | otherwise = return (x ++ "_time_tracker.md")
+      | otherwise = return (x ++ "_time_tracker.html")
 
 exitArg :: IO ()
 exitArg = errMsg "exiting !!!" >> exitSuccess
+
 
 -- helper functions
 date :: IO String
@@ -232,3 +231,22 @@ intTimeToHrs t = (hrs t, mins t)
   where
     hrs x = x `div` 3600
     mins x = (x `rem` 3600) `div` 60
+
+lineTag :: String
+lineTag = "<hr width=\"100%\" height=\"1px\" color=\"#A37ACC\" /> \n"
+listTag :: String
+listTag = "<ol> \n"
+elemTag :: String -> String -> String
+elemTag x t= " \n\
+  \ <li> \n\
+    \ <font color=\"#F48FB1\">" ++ x ++ "</font> \n\
+    \ <font color=\"#87DFEB\"> " ++ t ++ "</font> \n\
+  \ </li> \n\
+  \ <br> \n"
+
+timeSpentTag :: String -> String -> String
+timeSpentTag s t = " \n\
+    \ <h4> \n\
+      \ <font color=\"#8A889D\">"++ s ++"<//font> \n\
+      \ <font color=\"#63F2F1\">"++ t ++"<//font> \n\
+    \ <//h4> \n"
