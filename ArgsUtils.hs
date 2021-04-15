@@ -64,7 +64,7 @@ initArg = do
     else do
       tDir <- readInfoFile <&> (getTrackerDir . fromJust)
       file <- openFile (tDir ++ strDate ++ "_time_tracker.html") WriteMode
-      header <- readFile "header.html"
+      header <- infoDirPath >>= \x -> readFile (x ++ "header.html")
       hPutStrLn file (header ++ strDate ++ " </h2> </font> \n")
       infoMsg "Please enter your wake up time. Default current time. format (HH:MM 24hr)  eg: 16:56"
       strTime <- getLine >>= parseTime
@@ -137,6 +137,10 @@ commitArg = do
   fileExist <- doesTrackerExist
   if fileExist
     then do
+      infoMsg "can you please describe how was your today's day?"
+      dinfo <- getLine <&> \x -> if null x
+                                    then "None"
+                                    else x
       cacheF <- readCacheFile <&> fromJust
       deleteCacheFile
       tDir <- readInfoFile <&> (getTrackerDir . fromJust)
@@ -151,11 +155,21 @@ commitArg = do
       hPutStrLn file (timeSpentTag "Total Productive Time :" (show (fst tPTime) ++ "hrs " ++ show (snd tPTime) ++ "min"))
       hPutStrLn file (timeSpentTag "Total UnProductive Time :" (show (fst tUTime) ++ "hrs " ++ show (snd tUTime) ++ "min"))
       hPutStrLn file (timeSpentTag "Total Miscellaneous Time :" (show (fst tMTime) ++ "hrs " ++ show (snd tMTime) ++ "min"))
+      hPutStrLn file (summaryTag dinfo)
       hPutStrLn file "<//body><//html>"
       hClose file
 
       successMsg "your today's tracker file has been sucessfully commited."
     else errMsg "Today's Tracker does not exist please create one. To commit today's tracker. \n"
+  where
+    summaryTag :: String -> String
+    summaryTag x =
+      "\n \
+      \ <br> \n \
+      \ <div class=\"boxed\" style=\"border: 1px solid #91ddff;\"> \n \
+      \ <font color=\"#62D196\"><h3 style=\"text-align: center;\">Summary of the day</h3></font> \n \
+      \ <font color=\"#F48FB1\" size=\"4\" style=\"text-align: center; max-width: 100%; word-wrap: break-word;\">\
+      \ " ++ x ++ "<//font><//div>"
 
 viewArg :: IO ()
 viewArg = do

@@ -64,13 +64,13 @@ readCacheFile = do
     Right [] -> return Nothing
   where
     getJSON :: IO B.ByteString
-    getJSON = cacheFile >>= B.readFile 
+    getJSON = cacheFile >>= B.readFile
 
 writeCacheFile :: CacheVars -> IO ()
 writeCacheFile cache = cacheFile >>= \x -> B.writeFile x (encode [cache])
 
 deleteCacheFile :: IO ()
-deleteCacheFile = cacheFile >>= removeFile 
+deleteCacheFile = cacheFile >>= removeFile
 
 createCacheFile :: String -> AType -> Int -> Int -> Int -> Int -> CacheVars
 createCacheFile = CacheVars
